@@ -1,0 +1,89 @@
+name: Deploy Angular to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "oauth-launchpad-ui/**"
+      - ".github/workflows/deploy-angular.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: oauth-launchpad-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: oauth-launchpad-ui
+        run: npm ci
+
+      - name: Build Angular application
+        working-directory: oauth-launchpad-ui
+        run: npm run build -- --base-href /auth_composio/
+
+      - name: Prepare GitHub Pages files
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p pages-artifact
+
+          INDEX_FILE=$(find oauth-launchpad-ui/dist -type f -name index.html -print -quit)
+
+          if [ -z "$INDEX_FILE" ]; then
+            echo "ERROR: Angular index.html was not found inside dist/"
+            echo "Check angular.json and the Angular build output."
+            exit 1
+          fi
+
+          BUILD_DIR=$(dirname "$INDEX_FILE")
+
+          echo "Angular build directory: $BUILD_DIR"
+
+          cp -a "$BUILD_DIR/." pages-artifact/
+
+          # Support client-side Angular routes on GitHub Pages.
+          cp pages-artifact/index.html pages-artifact/404.html
+
+          touch pages-artifact/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages-artifact
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
